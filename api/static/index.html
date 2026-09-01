@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Cloud Digital Twin Lab</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <div id="loginView" class="login-page">
+    <div class="login-card">
+      <div class="brand">CLOUD DIGITAL TWIN LAB</div>
+      <h1>Student Login</h1>
+      <p>Virtual AFG-2225 + GDS-1102B Laboratory</p>
+      <label>Student ID</label>
+      <input id="studentId" placeholder="e.g. 23TC-01" />
+      <label>Name</label>
+      <input id="studentName" placeholder="Student name" />
+      <button id="loginBtn" class="primary">Enter Virtual Lab</button>
+      <div id="loginError" class="error"></div>
+    </div>
+  </div>
+
+  <div id="labView" class="hidden">
+    <header class="topbar">
+      <div>
+        <div class="title">Cloud-Based Digital Twin Lab</div>
+        <div class="subtitle">Virtual AFG-2225 ↔ Virtual GDS-1102B</div>
+      </div>
+      <div class="status-group">
+        <span class="status-dot"></span>
+        <span>VIRTUAL LAB READY</span>
+        <span id="studentBadge" class="student-badge"></span>
+      </div>
+    </header>
+
+    <section class="experiment-bar">
+      <div>
+        <div class="experiment-label">EXPERIMENT</div>
+        <select id="experimentSelect">
+          <option value="loopback">1 — Direct AFG → GDS</option>
+          <option value="rc-lowpass">2 — RC Low-pass Filter</option>
+          <option value="rc-highpass">3 — RC High-pass Filter</option>
+        </select>
+      </div>
+      <div class="experiment-objective">
+        <div class="experiment-label">OBJECTIVE</div>
+        <div id="experimentObjective">Observe the direct virtual AFG output on the virtual GDS.</div>
+      </div>
+      <div class="experiment-status">
+        <div class="experiment-label">EXECUTION MODE</div>
+        <select id="executionMode">
+          <option value="virtual">Virtual Twin</option>
+          <option value="verified">Verified Hardware</option>
+        </select>
+        <div id="gatewayBadge" class="gateway-badge">Hardware gateway: checking...</div>
+      </div>
+    </section>
+
+    <main class="lab-grid">
+      <section class="panel afg-panel">
+        <div class="panel-heading">GW INSTEK AFG-2225 — VIRTUAL FUNCTION GENERATOR</div>
+
+        <div class="screen">
+          <div id="afgWaveTitle" class="wave-title">CH1 SINE</div>
+          <canvas id="afgPreview" width="460" height="135"></canvas>
+          <div id="afgReadout" class="readout"></div>
+        </div>
+
+        <div class="channel-row">
+          <button class="channel-btn active" data-ch="1">CH1</button>
+          <button class="channel-btn" data-ch="2">CH2</button>
+          <button id="outputBtn" class="output-btn on">OUTPUT ON</button>
+        </div>
+
+        <div class="form-grid">
+          <label>Waveform
+            <select id="waveform">
+              <option>Sine</option><option>Square</option><option>Triangle</option><option>Sawtooth</option>
+            </select>
+          </label>
+          <label>Frequency (Hz)<input id="frequency" type="number" min="1" step="1" /></label>
+          <label>Amplitude (Vpp)<input id="amplitude" type="number" min="0" step="0.01" /></label>
+          <label>Offset (V)<input id="offset" type="number" step="0.01" /></label>
+          <label>Phase (deg)<input id="phase" type="number" step="1" /></label>
+          <label>Duty (%)<input id="duty" type="number" min="1" max="99" step="1" /></label>
+        </div>
+
+        <div class="dut-box">
+          <div class="subheading">Virtual DUT</div>
+          <div class="form-grid compact">
+            <label>DUT
+              <select id="dutType"><option>Loopback</option><option>RC Low-pass</option><option>RC High-pass</option></select>
+            </label>
+            <label>R (Ω)<input id="dutR" type="number" value="1000" /></label>
+            <label>C (F)<input id="dutC" type="number" value="0.000001" step="0.000001" /></label>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel scope-panel">
+        <div class="panel-heading">GDS-1102B — VIRTUAL OSCILLOSCOPE</div>
+        <div class="scope-screen">
+          <canvas id="scopeCanvas" width="760" height="520"></canvas>
+          <div id="scopeMetrics" class="scope-metrics"></div>
+        </div>
+      </section>
+
+      <section class="panel controls-panel">
+        <div class="panel-heading">OSCILLOSCOPE CONTROLS</div>
+
+        <label>Display
+          <select id="displayMode">
+            <option value="both">Both</option>
+            <option value="ch1">CH1 only</option>
+            <option value="ch2">CH2 only</option>
+          </select>
+        </label>
+
+        <label>Time/Div (s)<input id="timeDiv" type="number" value="0.0005" step="0.0001" /></label>
+
+        <div class="scope-channel-box ch1box">
+          <div class="subheading">CH1</div>
+          <label>Volts/Div<input id="ch1Vdiv" type="number" value="1" step="0.1" /></label>
+          <label>Position (div)<input id="ch1Pos" type="number" value="1" step="0.1" /></label>
+          <label>Coupling<select id="ch1Coupling"><option>DC</option><option>AC</option><option>GND</option></select></label>
+          <label>Probe<select id="ch1Probe"><option value="1">1X</option><option value="10">10X</option></select></label>
+        </div>
+
+        <div class="scope-channel-box ch2box">
+          <div class="subheading">CH2</div>
+          <label>Volts/Div<input id="ch2Vdiv" type="number" value="1" step="0.1" /></label>
+          <label>Position (div)<input id="ch2Pos" type="number" value="-1" step="0.1" /></label>
+          <label>Coupling<select id="ch2Coupling"><option>DC</option><option>AC</option><option>GND</option></select></label>
+          <label>Probe<select id="ch2Probe"><option value="1">1X</option><option value="10">10X</option></select></label>
+        </div>
+
+        <div class="theory-card">
+          <div class="subheading">Theory / Expected Result</div>
+          <div id="theoryBox" class="theory-box">Select an experiment to view the theoretical result.</div>
+        </div>
+
+        <button id="autosetBtn" class="secondary">AUTOSET</button>
+        <button id="verifyBtn" class="verify">CHECK SIGNAL</button>
+        <div id="verifyBox" class="verify-box">No virtual verification run yet.</div>
+
+        <div class="hardware-card">
+          <div class="subheading">Verified Digital Twin — Real Hardware</div>
+          <div class="hardware-note">Experiment 1 only: AFG CH1→GDS CH1 or AFG CH2→GDS CH2 through the physical BNC path.</div>
+          <button id="hardwareVerifyBtn" class="hardware-verify">VERIFY ON REAL HARDWARE</button>
+          <div id="hardwareVerifyBox" class="verify-box">No hardware verification run yet.</div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

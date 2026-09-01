@@ -1,0 +1,56 @@
+{
+  "contract_version": "2.0",
+  "purpose": "Single browser-to-execution contract shared by Virtual, Verified and Remote Hardware modes.",
+  "current_virtual_routes": {
+    "health": "GET /api/health",
+    "login_demo": "POST /api/login",
+    "trace": "POST /api/scope/{channel}/trace with LabState body",
+    "verify": "POST /api/verify/{channel} with LabState body"
+  },
+  "phase2_gateway_contract": {
+    "command_envelope": {
+      "request_id": "uuid/string",
+      "execution_mode": "verified | remote_hardware",
+      "student_session": "string",
+      "channel": "1 | 2",
+      "state": "LabState",
+      "action": "apply_and_measure | read_state | output_off"
+    },
+    "measurement_envelope": {
+      "request_id": "same request id",
+      "hardware_connected": "bool",
+      "afg_idn": "string",
+      "gds_idn": "string",
+      "measured_frequency_hz": "number/null",
+      "measured_vpp_v": "number/null",
+      "trace_time_s": "array",
+      "trace_volts": "array",
+      "frequency_error_pct": "number/null",
+      "amplitude_error_pct": "number/null"
+    }
+  },
+  "safety_rules": [
+    "Browser never sends raw SCPI.",
+    "Hardware gateway validates command envelope before SCPI translation.",
+    "On disconnect/timeout/shutdown: both AFG outputs OFF."
+  ],
+  "phase2_verified_mode": {
+    "browser_create": "POST /api/hardware/jobs",
+    "browser_poll": "GET /api/hardware/jobs/{job_id}",
+    "browser_gateway_status": "GET /api/hardware/status",
+    "gateway_heartbeat": "POST /api/gateway/heartbeat with X-Gateway-Key",
+    "gateway_claim": "GET /api/gateway/jobs/next?gateway_id=... with X-Gateway-Key",
+    "gateway_result": "POST /api/gateway/jobs/{job_id}/result with X-Gateway-Key",
+    "persistence": "Supabase Postgres via server-side service-role REST calls",
+    "physical_fixture": "AFG CH1->GDS CH1 and AFG CH2->GDS CH2",
+    "verified_dut_support": [
+      "Loopback/direct BNC"
+    ]
+  },
+  "phase2_storage": {
+    "provider": "Upstash Redis",
+    "purpose": "short-lived FIFO hardware job queue + gateway heartbeat",
+    "browser_credentials_exposed": false,
+    "matlab_redis_credentials_required": false
+  }
+}
