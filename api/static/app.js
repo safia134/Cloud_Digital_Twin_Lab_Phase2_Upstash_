@@ -443,9 +443,21 @@ function applyPhysicalAfgStateToTwin(hw) {
   if (typeof target.output_on === "boolean") a.output_on = target.output_on;
 
   outputOn = a.output_on;
+
+  // Refresh every visible Twin surface from the newly-read physical AFG state.
   loadSelectedChannelIntoForm();
   updateAFGDisplay();
+  updateScopeDisplay();
   $("theoryBox").textContent = theoreticalSummary();
+
+  // The old CHECK SIGNAL panel was a snapshot and therefore looked
+  // unsynchronized. Recalculate it automatically while Verified Hardware
+  // mode is active so it always follows the physical AFG state.
+  try {
+    checkSignal();
+  } catch (err) {
+    console.warn("Auto CHECK SIGNAL refresh failed:", err);
+  }
 }
 
 async function refreshGatewayStatus() {
