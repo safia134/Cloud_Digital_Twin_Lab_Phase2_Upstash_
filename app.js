@@ -507,19 +507,15 @@ function applyPhysicalAfgStateToTwin(hw) {
   // Refresh every visible Twin surface from the newly-read physical AFG state.
   loadSelectedChannelIntoForm();
   updateAFGDisplay();
-  updateScopeDisplay();
+  refreshScope().catch(err => {
+  console.warn("Auto scope refresh failed:", err);
+});
   $("theoryBox").textContent = theoreticalSummary();
 
   // The old CHECK SIGNAL panel was a snapshot and therefore looked
   // unsynchronized. Recalculate it automatically while Verified Hardware
   // mode is active so it always follows the physical AFG state.
-  try {
-    checkSignal();
-  } catch (err) {
-    console.warn("Auto CHECK SIGNAL refresh failed:", err);
-  }
-}
-
+  
 async function refreshGatewayStatus() {
   const badge = $("gatewayBadge");
   try {
