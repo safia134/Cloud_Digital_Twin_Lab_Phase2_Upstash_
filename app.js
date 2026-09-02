@@ -542,7 +542,7 @@ async function refreshGatewayStatus() {
     }
   } catch (e) {
     gatewayOnline = false;
-    badge.textContent = "Hardware gateway: Phase 2 database not configured";
+    badge.textContent = "Hardware gateway: connection unavailable";
     badge.classList.add("gateway-offline");
     badge.classList.remove("gateway-online");
   }
