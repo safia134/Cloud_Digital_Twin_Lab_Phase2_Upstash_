@@ -494,23 +494,47 @@ function applyPhysicalAfgStateToTwin(hw) {
 
   const a = selectedAfgState();
 
-  if (target.waveform) a.waveform = target.waveform;
-  if (Number.isFinite(Number(target.frequency_hz))) a.frequency_hz = Number(target.frequency_hz);
-  if (Number.isFinite(Number(target.amplitude_vpp))) a.amplitude_vpp = Number(target.amplitude_vpp);
-  if (Number.isFinite(Number(target.offset_v))) a.offset_v = Number(target.offset_v);
-  if (Number.isFinite(Number(target.phase_deg))) a.phase_deg = Number(target.phase_deg);
-  if (Number.isFinite(Number(target.duty_pct))) a.duty_pct = Number(target.duty_pct);
-  if (typeof target.output_on === "boolean") a.output_on = target.output_on;
+  if (target.waveform) {
+    a.waveform = target.waveform;
+  }
+
+  if (Number.isFinite(Number(target.frequency_hz))) {
+    a.frequency_hz = Number(target.frequency_hz);
+  }
+
+  if (Number.isFinite(Number(target.amplitude_vpp))) {
+    a.amplitude_vpp = Number(target.amplitude_vpp);
+  }
+
+  if (Number.isFinite(Number(target.offset_v))) {
+    a.offset_v = Number(target.offset_v);
+  }
+
+  if (Number.isFinite(Number(target.phase_deg))) {
+    a.phase_deg = Number(target.phase_deg);
+  }
+
+  if (Number.isFinite(Number(target.duty_pct))) {
+    a.duty_pct = Number(target.duty_pct);
+  }
+
+  if (typeof target.output_on === "boolean") {
+    a.output_on = target.output_on;
+  }
 
   outputOn = a.output_on;
 
-  // Refresh every visible Twin surface from the newly-read physical AFG state.
+  // Update the virtual AFG controls/display from the real AFG.
   loadSelectedChannelIntoForm();
   updateAFGDisplay();
-  updateScopeDisplay();
   $("theoryBox").textContent = theoreticalSummary();
 
-  // The old CHECK SIGNAL panel was a snapshot and therefore looked
+  // Refresh the virtual oscilloscope using the synchronized state.
+  refreshScope().catch(err => {
+    console.warn("Auto scope refresh failed:", err);
+  });
+}
+// The old CHECK SIGNAL panel was a snapshot and therefore looked
   // unsynchronized. Recalculate it automatically while Verified Hardware
   // mode is active so it always follows the physical AFG state.
   try {
@@ -542,7 +566,7 @@ async function refreshGatewayStatus() {
     }
   } catch (e) {
     gatewayOnline = false;
-    badge.textContent = "Hardware gateway: Phase 2 database not configured";
+    badge.textContent = "Hardware gateway: connection unavailable";
     badge.classList.add("gateway-offline");
     badge.classList.remove("gateway-online");
   }
