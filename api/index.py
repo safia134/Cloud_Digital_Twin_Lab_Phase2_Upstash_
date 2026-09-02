@@ -53,6 +53,11 @@ class GatewayHeartbeat(BaseModel):
     afg_port: Optional[str] = None
     gds_port: Optional[str] = None
     version: str = "phase2-1.0"
+    # Live physical AFG state, supplied by MATLAB heartbeat.
+    # These are intentionally simple dictionaries so the gateway can evolve
+    # without breaking the cloud API.
+    afg_ch1: Optional[dict] = None
+    afg_ch2: Optional[dict] = None
 
 class GatewayJobResult(BaseModel):
     gateway_id: str = Field(min_length=1, max_length=80)
@@ -367,6 +372,8 @@ def gateway_heartbeat(req: GatewayHeartbeat, x_gateway_key: Optional[str] = Head
         "afg_port": req.afg_port,
         "gds_port": req.gds_port,
         "version": req.version,
+        "afg_ch1": req.afg_ch1,
+        "afg_ch2": req.afg_ch2,
     }
     _redis_pipeline([
         ["SET", _gateway_key(req.gateway_id), _json_store(gateway), "EX", GATEWAY_TTL_SECONDS],

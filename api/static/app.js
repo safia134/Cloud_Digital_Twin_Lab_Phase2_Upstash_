@@ -426,6 +426,28 @@ $("dutType").addEventListener("change", () => {
 
 
 // ===== Phase 2 verified-hardware workflow =====
+function applyPhysicalAfgStateToTwin(hw) {
+  if (!hw) return;
+
+  const target = selectedChannel === 1 ? hw.afg_ch1 : hw.afg_ch2;
+  if (!target) return;
+
+  const a = selectedAfgState();
+
+  if (target.waveform) a.waveform = target.waveform;
+  if (Number.isFinite(Number(target.frequency_hz))) a.frequency_hz = Number(target.frequency_hz);
+  if (Number.isFinite(Number(target.amplitude_vpp))) a.amplitude_vpp = Number(target.amplitude_vpp);
+  if (Number.isFinite(Number(target.offset_v))) a.offset_v = Number(target.offset_v);
+  if (Number.isFinite(Number(target.phase_deg))) a.phase_deg = Number(target.phase_deg);
+  if (Number.isFinite(Number(target.duty_pct))) a.duty_pct = Number(target.duty_pct);
+  if (typeof target.output_on === "boolean") a.output_on = target.output_on;
+
+  outputOn = a.output_on;
+  loadSelectedChannelIntoForm();
+  updateAFGDisplay();
+  $("theoryBox").textContent = theoreticalSummary();
+}
+
 async function refreshGatewayStatus() {
   const badge = $("gatewayBadge");
   try {
@@ -435,6 +457,12 @@ async function refreshGatewayStatus() {
       badge.textContent = `Hardware gateway: ONLINE (${s.gateway_id || "lab"})`;
       badge.classList.add("gateway-online");
       badge.classList.remove("gateway-offline");
+
+      // In Verified Hardware mode, the physical AFG is authoritative.
+      // Manual front-panel changes therefore flow AFG -> Cloud -> Twin.
+      if ($("executionMode").value === "verified") {
+        applyPhysicalAfgStateToTwin(s);
+      }
     } else {
       badge.textContent = "Hardware gateway: OFFLINE / not connected";
       badge.classList.add("gateway-offline");
@@ -546,5 +574,5 @@ $("hardwareVerifyBtn").addEventListener("click", async () => {
   }
 });
 
-setInterval(refreshGatewayStatus, 12000);
+setInterval(refreshGatewayStatus, 5000);
 window.addEventListener("load", refreshGatewayStatus);
