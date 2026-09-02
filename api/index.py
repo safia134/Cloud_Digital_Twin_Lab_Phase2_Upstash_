@@ -43,7 +43,7 @@ class HardwareJobCreate(BaseModel):
     session_id: Optional[str] = None
     channel: Literal[1, 2]
     state: LabState
-    action: Literal["apply_and_measure", "output_off"] = "apply_and_measure"
+    action: Literal["apply_and_measure", "apply_state", "output_off"] = "apply_and_measure"
 
 class GatewayHeartbeat(BaseModel):
     gateway_id: str = Field(min_length=1, max_length=80)

@@ -49,7 +49,7 @@ sendHeartbeat("online");
 lastHeartbeat = tic;
 
 while true
-    if toc(lastHeartbeat) >= 12
+    if toc(lastHeartbeat) >= 5
         sendHeartbeat("online");
         lastHeartbeat = tic;
     end
@@ -101,6 +101,15 @@ end
     end
 
     function sendHeartbeat(statusText)
+        % Read the physical generator so front-panel changes can flow
+        % AFG -> Cloud -> Browser Twin. Some serial queries place the AFG
+        % in REMOTE. Always restore LOCAL after the snapshot so the front
+        % panel remains usable for hardware -> twin changes.
+        try, enterAfgRemote(afg); catch, end
+        localCleanup = onCleanup(@()restoreAfgLocal(afg)); %#ok<NASGU>
+        liveCh1 = readAfgChannelState(afg,1);
+        liveCh2 = readAfgChannelState(afg,2);
+
         hb = struct( ...
             'gateway_id',char(gatewayId), ...
             'status',char(statusText), ...
@@ -108,12 +117,15 @@ end
             'gds_idn',char(gdsIdn), ...
             'afg_port',char(afgPort), ...
             'gds_port',char(gdsPort), ...
-            'version','phase2-1.0');
+            'version','phase2-bidir-1.0', ...
+            'afg_ch1',liveCh1, ...
+            'afg_ch2',liveCh2);
         try
             webwrite(baseUrl + "/api/gateway/heartbeat", hb, gatewayWebOptions());
         catch ME
             fprintf(2,'Heartbeat warning: %s\n',ME.message);
         end
+        try, restoreAfgLocal(afg); catch, end
     end
 
     function result = executeJob(job)
@@ -148,27 +160,61 @@ end
         validateSafety(a);
         enterAfgRemote(afg);
         remoteCleanup = onCleanup(@()restoreAfgLocal(afg)); %#ok<NASGU>
-        outputCleanup = onCleanup(@()outputOff(afg,ch)); %#ok<NASGU>
 
         configureAfg(afg,ch,a);
+
+        % Live Twin -> AFG synchronization job. Apply the selected channel
+        % state and return immediately; do not measure and do not turn output OFF.
+        if strcmpi(string(job.action),'apply_state')
+            restoreAfgLocal(afg);
+            result = baseResult();
+            result.hardware_connected = true;
+            result.configured_frequency_hz = finiteOrEmpty(double(a.frequency_hz));
+            result.configured_vpp_v = finiteOrEmpty(double(a.amplitude_vpp));
+            return;
+        end
+
         configureGds(gds,ch,state.scope,s);
-        pause(0.35);
+        pause(0.45);
 
         fConfigured = str2double(queryAfg(afg,sprintf('SOURCE%d:FREQUENCY?',ch)));
-        ampConfigured = str2double(queryAfg(afg,sprintf('SOURCE%d:AMPLITUDE?',ch)));
+        ampReadback = str2double(queryAfg(afg,sprintf('SOURCE%d:AMPLITUDE?',ch)));
         ampUnit = upper(strtrim(queryAfg(afg,sprintf('SOURCE%d:VOLTAGE:UNIT?',ch))));
         if ~contains(ampUnit,'VPP')
             error('Gateway expects AFG readback in VPP but received %s.',ampUnit);
         end
 
-        [expectedVpp,loadText] = expectedHighZVpp(afg,ch,ampConfigured);
+        % In this gateway we explicitly force OUTPUTn:LOAD to INF/HIGH-Z,
+        % therefore AFG VPP readback and the voltage expected at the high-Z
+        % GDS input use the same Vpp quantity.
+        ampConfigured = double(a.amplitude_vpp);
+        expectedVpp = ampReadback;
+        try
+            loadText = upper(strtrim(queryAfg(afg,sprintf('OUTPUT%d:LOAD?',ch))));
+        catch
+            loadText = 'UNKNOWN';
+        end
+
         [fMeasured,fMethod] = queryGdsFrequencyRobust(gds,ch);
-        vppMeasured = queryGdsMeasurement(gds,ch,'PK2Pk');
+        vppMeasured = NaN;
+        for measTry = 1:3
+            vppMeasured = queryGdsMeasurement(gds,ch,'PK2Pk');
+            if isfinite(vppMeasured) && vppMeasured > 0.001
+                break;
+            end
+            pause(0.20);
+        end
 
         [traceT,traceV] = captureGdsWaveform(gds,ch,1000);
         if ~isfinite(fMeasured) && ~isempty(traceT)
             fMeasured = estimateFrequencyFFT(traceT,traceV);
             fMethod = 'waveform-FFT';
+        end
+
+        % GDS-1102B v1.29 may intermittently return '?' for PK2Pk.
+        % If so, derive Vpp from the captured waveform instead of failing.
+        if ~isfinite(vppMeasured) && ~isempty(traceV)
+            vppMeasured = max(traceV) - min(traceV);
         end
 
         freqErr = NaN;
@@ -184,6 +230,7 @@ end
         result.hardware_connected = true;
         result.configured_frequency_hz = finiteOrEmpty(fConfigured);
         result.configured_vpp_v = finiteOrEmpty(ampConfigured);
+        result.afg_readback_vpp_v = finiteOrEmpty(ampReadback);
         result.expected_hardware_vpp_v = finiteOrEmpty(expectedVpp);
         result.measured_frequency_hz = finiteOrEmpty(fMeasured);
         result.measured_vpp_v = finiteOrEmpty(vppMeasured);
@@ -194,8 +241,8 @@ end
         result.trace_time_s = downsampleVector(traceT,1000);
         result.trace_volts = downsampleVector(traceV,1000);
 
-        fprintf('CH%d: f %.9g -> %.9g Hz (%.3g%%), Vpp expected %.9g -> measured %.9g (%.3g%%)\n', ...
-            ch,fConfigured,fMeasured,freqErr,expectedVpp,vppMeasured,ampErr);
+        fprintf('CH%d: f %.9g -> %.9g Hz (%.3g%%), Vpp requested %.9g, AFG readback %.9g, measured %.9g (%.3g%%)\n', ...
+            ch,fConfigured,fMeasured,freqErr,ampConfigured,ampReadback,vppMeasured,ampErr);
     end
 
     function r = baseResult()
@@ -209,6 +256,7 @@ end
             'gds_port',char(gdsPort), ...
             'configured_frequency_hz',[], ...
             'configured_vpp_v',[], ...
+            'afg_readback_vpp_v',[], ...
             'expected_hardware_vpp_v',[], ...
             'measured_frequency_hz',[], ...
             'measured_vpp_v',[], ...
@@ -317,6 +365,82 @@ function outputOff(afg,ch)
 try, writeAfg(afg,sprintf('OUTPUT%d OFF',ch)); catch, end
 end
 
+function s = readAfgChannelState(afg,ch)
+% Read current physical AFG state. This is used only for heartbeat sync.
+s = struct( ...
+    'waveform','Sine', ...
+    'frequency_hz',[], ...
+    'amplitude_vpp',[], ...
+    'offset_v',[], ...
+    'phase_deg',[], ...
+    'duty_pct',50, ...
+    'output_on',false);
+
+src = sprintf('SOURCE%d',ch);
+outp = sprintf('OUTPUT%d',ch);
+
+try
+    f = str2double(queryAfg(afg,sprintf('%s:FREQUENCY?',src)));
+    if isfinite(f), s.frequency_hz = f; end
+catch
+end
+
+try
+    a = str2double(queryAfg(afg,sprintf('%s:AMPLITUDE?',src)));
+    if isfinite(a), s.amplitude_vpp = a; end
+catch
+end
+
+try
+    o = str2double(queryAfg(afg,sprintf('%s:DCOFFSET?',src)));
+    if isfinite(o), s.offset_v = o; end
+catch
+end
+
+try
+    p = str2double(queryAfg(afg,sprintf('%s:PHASE?',src)));
+    if isfinite(p), s.phase_deg = p; end
+catch
+end
+
+try
+    fn = upper(strtrim(queryAfg(afg,sprintf('%s:FUNCTION?',src))));
+    if contains(fn,'SIN')
+        s.waveform = 'Sine';
+    elseif contains(fn,'SQU')
+        s.waveform = 'Square';
+        try
+            d = str2double(queryAfg(afg,sprintf('%s:SQUARE:DCYCLE?',src)));
+            if isfinite(d), s.duty_pct = d; end
+        catch
+        end
+    elseif contains(fn,'RAMP')
+        sym = NaN;
+        try
+            sym = str2double(queryAfg(afg,sprintf('%s:RAMP:SYMMETRY?',src)));
+        catch
+        end
+        if isfinite(sym) && sym > 75
+            s.waveform = 'Sawtooth';
+        else
+            s.waveform = 'Triangle';
+        end
+    end
+catch
+end
+
+try
+    outText = strtrim(queryAfg(afg,sprintf('%s?',outp)));
+    outNum = str2double(outText);
+    if isfinite(outNum)
+        s.output_on = outNum ~= 0;
+    else
+        s.output_on = strcmpi(outText,'ON');
+    end
+catch
+end
+end
+
 function safeShutdown(afg)
 if isempty(afg), return; end
 try, outputOff(afg,1); catch, end
@@ -360,6 +484,22 @@ switch lower(wave)
     case {'triangle','sawtooth'}, scpi='RAMP';
     otherwise, error('Unsupported waveform: %s',wave);
 end
+
+% Put the generator in a deterministic voltage-reference mode.
+% The GDS input is high impedance, so make the AFG amplitude itself be
+% referenced to HIGH-Z rather than leaving the instrument at DEF(50 ohm).
+try
+    writeAfg(afg,sprintf('OUTPUT%d:LOAD INF',ch));
+    pause(0.12);
+catch
+    % Some firmware may reject INF spelling; HIGHZ is attempted below.
+    try
+        writeAfg(afg,sprintf('OUTPUT%d:LOAD HIGHZ',ch));
+        pause(0.12);
+    catch
+    end
+end
+
 writeAfg(afg,sprintf('%s:FUNCTION %s',src,scpi));
 if strcmpi(wave,'Square')
     writeAfg(afg,sprintf('%s:SQUARE:DCYCLE %.12g',src,double(a.duty_pct)));
@@ -368,16 +508,47 @@ elseif strcmpi(wave,'Triangle')
 elseif strcmpi(wave,'Sawtooth')
     writeAfg(afg,sprintf('%s:RAMP:SYMMETRY 100',src));
 end
+
 writeAfg(afg,sprintf('%s:FREQUENCY %.12g',src,double(a.frequency_hz)));
 writeAfg(afg,sprintf('%s:VOLTAGE:UNIT VPP',src));
-writeAfg(afg,sprintf('%s:AMPLITUDE %.12g',src,double(a.amplitude_vpp)));
-writeAfg(afg,sprintf('%s:DCOFFSET %.12g',src,double(a.offset_v)));
+
+requestedVpp = double(a.amplitude_vpp);
+
+% First try the documented full keyword.
+writeAfg(afg,sprintf('%s:AMPLITUDE %.12g',src,requestedVpp));
+pause(0.18);
+readbackVpp = str2double(queryAfg(afg,sprintf('%s:AMPLITUDE?',src)));
+
+% If firmware did not commit it, retry with valid short form AMP.
+tol = max(1e-3,0.005*max(abs(requestedVpp),1));
+if ~isfinite(readbackVpp) || abs(readbackVpp-requestedVpp) > tol
+    fprintf(2,'AFG amplitude retry: requested %.9g Vpp, readback %.9g Vpp
+', ...
+        requestedVpp,readbackVpp);
+    writeAfg(afg,sprintf('%s:AMP %.12g',src,requestedVpp));
+    pause(0.20);
+    readbackVpp = str2double(queryAfg(afg,sprintf('%s:AMPLITUDE?',src)));
+end
+
+if ~isfinite(readbackVpp) || abs(readbackVpp-requestedVpp) > tol
+    error(['AFG-2225 did not accept requested amplitude. Requested %.9g Vpp, ' ...
+           'readback %.9g Vpp. Physical verification aborted.'], ...
+           requestedVpp,readbackVpp);
+end
+
+% Avoid selecting/activating the AFG OFFSET front-panel parameter when
+% the requested offset is exactly zero. Non-zero offsets are still applied.
+if abs(double(a.offset_v)) > 1e-12
+    writeAfg(afg,sprintf('%s:DCOFFSET %.12g',src,double(a.offset_v)));
+end
 writeAfg(afg,sprintf('%s:PHASE %.12g',src,double(a.phase_deg)));
+
 if logical(a.output_on)
     writeAfg(afg,sprintf('OUTPUT%d ON',ch));
 else
     writeAfg(afg,sprintf('OUTPUT%d OFF',ch));
 end
+pause(0.20);
 end
 
 function configureGds(gds,ch,scope,s)
@@ -388,6 +559,7 @@ writeGds(gds,sprintf(':CHANnel%d:SCALe %.12g',ch,max(double(s.volts_div),0.002))
 writeGds(gds,sprintf(':CHANnel%d:POSition %.12g',ch,double(s.position_div)*max(double(s.volts_div),0.002)));
 writeGds(gds,sprintf(':TIMebase:SCALe %.12g',max(double(scope.time_div_s),5e-9)));
 writeGds(gds,':TRIGger:TYPe EDGE');
+writeGds(gds,sprintf(':TRIGger:EDGe:SOURce CH%d',ch));
 writeGds(gds,sprintf(':TRIGger:LEVel %.12g',double(scope.trigger_level_v)));
 if strcmpi(string(scope.trigger_edge),'Falling')
     writeGds(gds,':TRIGger:EDGe:SLOP FALL');
@@ -395,6 +567,8 @@ else
     writeGds(gds,':TRIGger:EDGe:SLOP RISE');
 end
 writeGds(gds,':RUN');
+% Allow several acquisitions before asking for automatic measurements.
+pause(0.55);
 end
 
 function response = queryGds(gds,commandText)
@@ -548,7 +722,9 @@ idx=find(mask); if isempty(idx), return; end
 end
 
 function x = finiteOrEmpty(x)
-if ~isfinite(x), x=[]; end
+if isempty(x) || ~isnumeric(x) || ~isscalar(x) || ~isfinite(x)
+    x = [];
+end
 end
 
 function y = downsampleVector(x,maxN)

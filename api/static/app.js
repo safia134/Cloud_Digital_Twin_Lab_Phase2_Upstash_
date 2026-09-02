@@ -235,11 +235,63 @@ document.querySelectorAll(".channel-btn").forEach(btn => {
   });
 });
 
+async function sendTwinStateToHardware(action = "apply_state") {
+  if ($("executionMode").value !== "verified" || !gatewayOnline) return;
+  if (state.dut.type !== "Loopback") return;
+
+  collectState();
+  try {
+    const job = await api("/api/hardware/jobs", {
+      method: "POST",
+      body: {
+        student_id: studentId,
+        student_name: studentName,
+        session_id: sessionId,
+        channel: selectedChannel,
+        state,
+        action
+      }
+    });
+
+    const box = $("hardwareVerifyBox");
+    if (action === "output_off") {
+      box.textContent = `Sending CH${selectedChannel} OUTPUT OFF to hardware...`;
+    } else {
+      box.textContent = `Applying Twin CH${selectedChannel} settings to real AFG...`;
+    }
+
+    // Short poll: this is a control/sync job, not a full verification.
+    for (let i = 0; i < 20; i++) {
+      const r = await api(`/api/hardware/jobs/${job.id}`);
+      if (r.status === "done") {
+        box.textContent = `Twin → AFG synchronized on CH${selectedChannel}.`;
+        return;
+      }
+      if (r.status === "failed") {
+        box.textContent = `Twin → AFG sync failed: ${r.error_message || "hardware job failed"}`;
+        return;
+      }
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+  } catch (e) {
+    $("hardwareVerifyBox").textContent = `Twin → AFG sync error: ${e.message}`;
+  }
+}
+
 $("outputBtn").addEventListener("click", async () => {
   outputOn = !outputOn;
   saveAFGFormToState();
   updateOutputButton();
   await refreshAll();
+
+  // In Verified Hardware mode the OUTPUT button controls the real AFG too.
+  if ($("executionMode").value === "verified" && gatewayOnline) {
+    if (outputOn) {
+      await sendTwinStateToHardware("apply_state");
+    } else {
+      await sendTwinStateToHardware("output_off");
+    }
+  }
 });
 
 function collectState() {
@@ -409,7 +461,15 @@ $("experimentSelect").addEventListener("change", async () => {
 });
 
 [
-  "waveform","frequency","amplitude","offset","phase","duty",
+  "waveform","frequency","amplitude","offset","phase","duty"
+].forEach(id => $(id).addEventListener("change", async () => {
+  await refreshAll();
+  if ($("executionMode").value === "verified" && gatewayOnline) {
+    await sendTwinStateToHardware("apply_state");
+  }
+}));
+
+[
   "dutType","dutR","dutC","displayMode","timeDiv",
   "ch1Vdiv","ch1Pos","ch1Coupling","ch1Probe",
   "ch2Vdiv","ch2Pos","ch2Coupling","ch2Probe"
